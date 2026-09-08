@@ -1,153 +1,17 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
+import os
 import joblib
-import time
+import numpy as np
+import pandas as pd
+from flask import Flask, request, render_template_string
 
-# --- Page Settings ---
-st.set_page_config(
-    page_title="Student Performance Predictor",
-    page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+app = Flask(__name__)
 
-# --- Modern Dashboard Styling ---
-st.markdown(
-    """
-    <style>
-    .main {
-        background-color: #f8fafc;
-    }
-    .result-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px;
-        padding: 24px;
-        color: white;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-        border: 1px solid #334155;
-        margin-top: 20px;
-    }
-    .score-badge {
-        font-size: 3rem;
-        font-weight: 800;
-        background: linear-gradient(90deg, #38bdf8, #818cf8);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
-    }
-    div.stButton > button:first-child {
-        background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
-        color: white;
-        font-weight: 600;
-        font-size: 1rem;
-        border-radius: 10px;
-        padding: 0.65rem 2rem;
-        border: none;
-        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
-        transition: all 0.2s ease-in-out;
-    }
-    div.stButton > button:first-child:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45);
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# Load model
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "svm.pkl")
+model = joblib.load(MODEL_PATH)
 
-# --- Model Loading ---
-@st.cache_resource
-def load_svm_model():
-    try:
-        # Attempts to load svm.pkl, fallback to model.pkl if renamed
-        return joblib.load("svm.pkl")
-    except FileNotFoundError:
-        try:
-            return joblib.load("model.pkl")
-        except Exception as e:
-            st.error(f"Could not find 'svm.pkl': {e}")
-            return None
-    except Exception as e:
-        st.error(f"Error loading model: {e}")
-        return None
-
-model = load_svm_model()
-
-# --- Sidebar Controls ---
-with st.sidebar:
-    st.header("⚙️ App Settings")
-    celebration_fx = st.selectbox(
-        "Prediction Effect",
-        ["Balloons 🎉", "Snow ❄️", "Toast Notification ⚡"],
-        index=0,
-    )
-    st.markdown("---")
-    st.markdown(
-        """
-        **Model Details:**
-        - **Algorithm:** Support Vector Regressor (`SVR`)
-        - **Kernel:** RBF (Radial Basis Function)
-        - **Input Features:** 11 Parameters
-        """
-    )
-
-# --- App Header ---
-st.title("🎓 Student Performance Forecasting")
-st.caption("Predict estimated exam performance based on academic, lifestyle, and institutional factors.")
-st.markdown("---")
-
-# --- Structured Inputs ---
-with st.container():
-    st.subheader("1. Demographics & Course")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        age = st.number_input("Age", min_value=15, max_value=60, value=21, step=1)
-    with col2:
-        gender_label = st.selectbox("Gender", ["Female", "Male", "Other"])
-        gender_map = {"Female": 0, "Male": 1, "Other": 2}
-        gender = gender_map[gender_label]
-    with col3:
-        course_label = st.selectbox("Course Track", ["Computer Science", "Engineering", "Business", "Arts & Sciences"])
-        course_map = {"Computer Science": 0, "Engineering": 1, "Business": 2, "Arts & Sciences": 3}
-        course = course_map[course_label]
-
-st.markdown("---")
-
-with st.container():
-    st.subheader("2. Study Habits & Attendance")
-    col4, col5, col6 = st.columns(3)
-    
-    with col4:
-        study_hours = st.slider("Weekly Study Hours", min_value=0.0, max_value=60.0, value=18.5, step=0.5)
-    with col5:
-        class_attendance = st.slider("Class Attendance Rate (%)", min_value=0.0, max_value=100.0, value=85.0, step=1.0)
-    with col6:
-        study_method_label = st.selectbox("Primary Study Method", ["Self-Study", "Group Study", "Online Tutorials", "Coaching"])
-        study_method_map = {"Self-Study": 0, "Group Study": 1, "Online Tutorials": 2, "Coaching": 3}
-        study_method = study_method_map[study_method_label]
-
-st.markdown("---")
-
-with st.container():
-    st.subheader("3. Environment, Wellness & Exam Parameters")
-    col7, col8, col9 = st.columns(3)
-    
-    with col7:
-        internet_access_label = st.radio("Internet Access at Home", ["Yes", "No"], horizontal=True)
-        internet_access = 1 if internet_access_label == "Yes" else 0
-        sleep_hours = st.number_input("Average Sleep Hours / Day", min_value=3.0, max_value=12.0, value=7.0, step=0.5)
-    with col8:
-        sleep_quality = st.slider("Sleep Quality Rating (1 = Poor, 5 = Excellent)", min_value=1, max_value=5, value=4)
-        facility_rating = st.slider("Campus Facility Rating (1 = Basic, 5 = Premium)", min_value=1, max_value=5, value=3)
-    with col9:
-        exam_difficulty_label = st.selectbox("Exam Difficulty Level", ["Easy", "Moderate", "Hard"])
-        diff_map = {"Easy": 1, "Moderate": 2, "Hard": 3}
-        exam_difficulty = diff_map[exam_difficulty_label]
-
-# --- Assemble DataFrame matching training feature names ---
-feature_columns = [
+# Feature list matching the model's feature_names_in_
+FEATURE_NAMES = [
     "age",
     "gender",
     "course",
@@ -161,62 +25,326 @@ feature_columns = [
     "exam_difficulty",
 ]
 
-input_data = pd.DataFrame(
-    [[
-        float(age),
-        float(gender),
-        float(course),
-        float(study_hours),
-        float(class_attendance),
-        float(internet_access),
-        float(sleep_hours),
-        float(sleep_quality),
-        float(study_method),
-        float(facility_rating),
-        float(exam_difficulty),
-    ]],
-    columns=feature_columns,
-)
+# Categorical mappings if your model was trained on label-encoded values
+CATEGORICAL_MAPPINGS = {
+    "gender": {"Female": 0, "Male": 1, "Other": 2},
+    "course": {
+        "Computer Science": 0,
+        "Engineering": 1,
+        "Business": 2,
+        "Medicine": 3,
+        "Arts": 4,
+        "Other": 5,
+    },
+    "internet_access": {"No": 0, "Yes": 1},
+    "sleep_quality": {"Poor": 0, "Average": 1, "Good": 2},
+    "study_method": {
+        "Self Study": 0,
+        "Group Study": 1,
+        "Online Lectures": 2,
+        "Coaching": 3,
+    },
+    "facility_rating": {"Low": 0, "Medium": 1, "High": 2},
+    "exam_difficulty": {"Easy": 0, "Moderate": 1, "Hard": 2},
+}
 
-st.markdown("---")
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Performance Predictor (SVR)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --card-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 30px rgba(99, 102, 241, 0.15);
+            --input-bg: rgba(15, 23, 42, 0.6);
+            --input-border: rgba(255, 255, 255, 0.15);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
 
-# --- Run Inference ---
-btn_col, _ = st.columns([1, 4])
-with btn_col:
-    predict_btn = st.button("Generate Score Prediction 🚀", use_container_width=True)
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
 
-if predict_btn:
-    if model is None:
-        st.error("Model file `svm.pkl` was not loaded properly.")
-    else:
-        with st.spinner("Executing SVR kernel projection..."):
-            time.sleep(0.5)  # brief UI pause for smoother feel
-            
-            try:
-                prediction = model.predict(input_data)[0]
+        body {
+            background: var(--bg-gradient);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2.5rem 1rem;
+            color: var(--text-main);
+        }
 
-                # Trigger selected effect
-                if celebration_fx == "Balloons 🎉":
-                    st.balloons()
-                elif celebration_fx == "Snow ❄️":
-                    st.snow()
-                st.toast("Inference generated successfully!", icon="✅")
+        .container {
+            width: 100%;
+            max-width: 820px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 2.5rem;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: var(--card-shadow);
+        }
 
-                # Attractive Output Display Card
-                st.markdown(
-                    f"""
-                    <div class="result-card">
-                        <div style="font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; color: #94a3b8;">
-                            Estimated Academic Score
-                        </div>
-                        <p class="score-badge">{prediction:.2f}</p>
-                        <p style="color: #cbd5e1; margin-top: 8px; font-size: 0.95rem;">
-                            Model: <b>SVR (RBF Kernel)</b> | Features: <b>11 evaluated attributes</b>
-                        </p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
 
-            except Exception as ex:
-                st.error(f"Inference execution failed: {ex}")
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #ffffff, #c7d2fe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 1.25rem;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #cbd5e1;
+            text-transform: capitalize;
+        }
+
+        input, select {
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            color: var(--text-main);
+            font-size: 0.95rem;
+            outline: none;
+            transition: all 0.2s ease-in-out;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        input:focus, select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3);
+        }
+
+        select option {
+            background-color: #1e293b;
+            color: #ffffff;
+        }
+
+        .submit-btn {
+            grid-column: 1 / -1;
+            margin-top: 1.5rem;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+            color: #ffffff;
+            font-weight: 600;
+            font-size: 1.05rem;
+            padding: 1rem;
+            border: none;
+            border-radius: 14px;
+            cursor: pointer;
+            box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4);
+            transition: all 0.25s ease;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 25px -5px rgba(99, 102, 241, 0.5);
+        }
+
+        .result-box {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 8px 30px rgba(99, 102, 241, 0.2);
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        .result-box h3 {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .result-box .score {
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: #a5b4fc;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Academic Performance Predictor</h1>
+            <p>Enter student academic parameters to predict score via SVR</p>
+        </div>
+
+        <form method="POST">
+            <div class="form-grid">
+                <!-- Numeric Inputs -->
+                <div class="input-group">
+                    <label>Age</label>
+                    <input type="number" name="age" step="1" min="10" max="100" required value="{{ request.form.get('age', 20) }}">
+                </div>
+
+                <div class="input-group">
+                    <label>Study Hours / Day</label>
+                    <input type="number" name="study_hours" step="0.1" min="0" max="24" required value="{{ request.form.get('study_hours', 5.0) }}">
+                </div>
+
+                <div class="input-group">
+                    <label>Class Attendance (%)</label>
+                    <input type="number" name="class_attendance" step="0.1" min="0" max="100" required value="{{ request.form.get('class_attendance', 85.0) }}">
+                </div>
+
+                <div class="input-group">
+                    <label>Sleep Hours / Day</label>
+                    <input type="number" name="sleep_hours" step="0.1" min="0" max="24" required value="{{ request.form.get('sleep_hours', 7.0) }}">
+                </div>
+
+                <!-- Categorical Dropdowns -->
+                <div class="input-group">
+                    <label>Gender</label>
+                    <select name="gender" required>
+                        <option value="Female">Female</option>
+                        <option value="Male">Male</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Course</label>
+                    <select name="course" required>
+                        <option value="Computer Science">Computer Science</option>
+                        <option value="Engineering">Engineering</option>
+                        <option value="Business">Business</option>
+                        <option value="Medicine">Medicine</option>
+                        <option value="Arts">Arts</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Internet Access</label>
+                    <select name="internet_access" required>
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Sleep Quality</label>
+                    <select name="sleep_quality" required>
+                        <option value="Good">Good</option>
+                        <option value="Average">Average</option>
+                        <option value="Poor">Poor</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Study Method</label>
+                    <select name="study_method" required>
+                        <option value="Self Study">Self Study</option>
+                        <option value="Group Study">Group Study</option>
+                        <option value="Online Lectures">Online Lectures</option>
+                        <option value="Coaching">Coaching</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Facility Rating</label>
+                    <select name="facility_rating" required>
+                        <option value="High">High</option>
+                        <option value="Medium">Medium</option>
+                        <option value="Low">Low</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label>Exam Difficulty</label>
+                    <select name="exam_difficulty" required>
+                        <option value="Easy">Easy</option>
+                        <option value="Moderate">Moderate</option>
+                        <option value="Hard">Hard</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="submit-btn">Predict Score</button>
+            </div>
+        </form>
+
+        {% if prediction is not none %}
+        <div class="result-box">
+            <h3>Predicted Performance Score</h3>
+            <div class="score">{{ prediction }}</div>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    prediction = None
+    if request.method == "POST":
+        try:
+            form_data = {}
+            for col in FEATURE_NAMES:
+                val = request.form.get(col)
+                if col in CATEGORICAL_MAPPINGS:
+                    form_data[col] = CATEGORICAL_MAPPINGS[col].get(val, 0)
+                else:
+                    form_data[col] = float(val)
+
+            # Build DataFrame with exact feature order
+            input_df = pd.DataFrame([form_data], columns=FEATURE_NAMES)
+            raw_prediction = model.predict(input_df)[0]
+            prediction = f"{raw_prediction:.2f}"
+        except Exception as e:
+            prediction = f"Error: {str(e)}"
+
+    return render_template_string(HTML_TEMPLATE, prediction=prediction)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
